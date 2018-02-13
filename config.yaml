@@ -1,0 +1,9 @@
+telegram:
+  token: 
+
+database:
+  db: telegram-bot
+  host: 127.0.0.1
+  port: 2000
+  username: null
+  password: null
