@@ -6,20 +6,22 @@ from jinja2 import Environment, FileSystemLoader
 
 def __get_order_details(order_string):
         order = ''
-        quantity = 1 
+        quantity = None
         price = None
         for word in order_string.split(' '):
-            #quantity
+            #quantity & price
             if word.isdigit():
-                quantity = int(word)
-            #price
-            elif word.startswith('$') and word[1:].isdigit():
-                price = float(word[1:])
+                if quantity:
+                    price = float(word)
+                else:
+                    quantity = int(word)
             # order
             else:
                 if order:
                     order += ' '
                 order += word
+
+        quantity = quantity or 1
 
         return quantity, order, price
 
@@ -56,7 +58,7 @@ def setPrice(bot, update):
 
     orders = update.message.text.replace('/set ', '').split(',')
     for order in orders:
-        order, price = [x.strip() for x in order.split(':')]
+        order, price = [x.strip() for x in order.split('=')]
         if price.isdigit():
             Order.objects(session=session, order=order).update(price=price)
 
