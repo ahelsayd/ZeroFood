@@ -52,8 +52,6 @@ def setPrice(bot, update):
     chat_id = str(update.message.chat.id)
     session = Session.get(chat_id=chat_id)
     if not session:
-        text = 'No actice session, please start a new one'
-        bot.send_message(chat_id=chat_id, text=text)
         return
 
     orders = update.message.text.replace('/set ', '').split(',')
@@ -68,8 +66,6 @@ def myOrders(bot, update):
     session = Session.get(chat_id=chat_id)
 
     if not session:
-        text = 'No actice session, please start a new one'
-        bot.send_message(chat_id=chat_id, text=text)
         return
 
     orders = Order.objects.filter(session=session, username=username)
@@ -81,8 +77,6 @@ def allOrders(bot, update):
     session = Session.get(chat_id=chat_id)
 
     if not session:
-        text = 'No actice session, please start a new one'
-        bot.send_message(chat_id=chat_id, text=text)
         return
 
     pipeline = [
@@ -99,8 +93,6 @@ def pill(bot, update):
     session = Session.get(chat_id=chat_id)
 
     if not session:
-        text = 'No actice session, please start a new one'
-        bot.send_message(chat_id=chat_id, text=text)
         return
 
     pipeline = [
@@ -118,7 +110,6 @@ def addOrder(bot, update):
     username = update.message.from_user.username
 
     if not session:
-        update.message.reply_text('Please start a new session first')
         return
 
     if update.message.reply_to_message:
@@ -166,6 +157,8 @@ def main():
     updater.dispatcher.add_handler(CommandHandler('me', myOrders))
     updater.dispatcher.add_handler(CommandHandler('all', allOrders))
     updater.dispatcher.add_handler(CommandHandler('pill', pill))
+    updater.dispatcher.add_handler(CommandHandler('delivery', setdelivery))
+    updater.dispatcher.add_handler(CommandHandler('tax', setTax))
 
     updater.start_polling()
     updater.idle()
