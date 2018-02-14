@@ -1,0 +1,4 @@
+<b>Your Orders</b>
+{% for order in orders %}
+    <i>{{order.quantity}}x</i>  <b>{{order.order}}</b>  <i>{{order.price or ''}}</i>
+{% endfor %}

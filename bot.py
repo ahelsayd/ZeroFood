@@ -4,42 +4,25 @@ from telegram.ext import Updater, CommandHandler
 from telegram import ParseMode
 from jinja2 import Environment, FileSystemLoader
 
-
 def __get_order_details(order_string):
         order = ''
         quantity = 1 
         price = None
         for word in order_string.split(' '):
-            # check quantity
-            if word.endswith('x') and word[:word.find('x')].isdigit():
-                quantity = int(word[:word.find('x')])
-            # check price
+            #quantity
+            if word.isdigit():
+                quantity = int(word)
+            #price
             elif word.startswith('$') and word[1:].isdigit():
                 price = float(word[1:])
-            # check order
+            # order
             else:
-                order = word
+                if order:
+                    order += ' '
+                order += word
 
         return quantity, order, price
 
-# def __user_orders_msg(session, username):
-#     orders = Order.objects.filter(session=session, username=username)
-#     order_msg = 'Your orders:\n============\n'
-#     for order in orders:
-#         order_msg += '> {}x {} ${}\n'.format(
-#             order.quantity, order.order, order.price
-#         ) 
-#     return order_msg
-
-def __all_orders_msg(session):
-    orders = Order.objects.filter(session=session)
-    order_msg = 'All Orders:\n============\n'
-    for order in orders:
-        order_msg += '> @{} {}x {} ${}\n'.format(
-            order.username, order.quantity, order.order, (order.price or '?')
-        ) 
-    return order_msg
-    
 def startSession(bot, update):
     chat_id = str(update.message.chat.id)
     username = update.message.from_user.username
@@ -63,7 +46,6 @@ def endSession(bot, update):
     text = 'Session is ended'
     bot.send_message(chat_id=chat_id, text=text)
 
-
 def setPrice(bot, update):
     chat_id = str(update.message.chat.id)
     session = Session.get(chat_id=chat_id)
@@ -72,9 +54,11 @@ def setPrice(bot, update):
         bot.send_message(chat_id=chat_id, text=text)
         return
 
-    order, price = update.message.text.replace('/set ', '').split('=')
-    Order.objects(session=session, order=order).update(price=price)
-
+    orders = update.message.text.replace('/set ', '').split(',')
+    for order in orders:
+        order, price = [x.strip() for x in order.split(':')]
+        if price.isdigit():
+            Order.objects(session=session, order=order).update(price=price)
 
 def myOrders(bot, update):
     chat_id = str(update.message.chat.id)
@@ -87,9 +71,8 @@ def myOrders(bot, update):
         return
 
     orders = Order.objects.filter(session=session, username=username)
-    text = j2_env.get_template('user_orders.html').render(orders=orders, username=username)
-    bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
-
+    text = j2_env.get_template('me.html').render(orders=orders, username=username)
+    update.message.reply_text(text=text, parse_mode=ParseMode.HTML)
 
 def allOrders(bot, update):
     chat_id = str(update.message.chat.id)
@@ -100,24 +83,47 @@ def allOrders(bot, update):
         bot.send_message(chat_id=chat_id, text=text)
         return
 
-    orders = Order.objects.filter(session=session)
-    text = j2_env.get_template('all_orders.html').render(orders=orders)
+    pipeline = [
+        {'$match': {'session':session.id}},
+        {'$group':{'_id':{'order':'$order'}, 'quantity':{'$sum': "$quantity"}, 'users':{'$push':{'username':'$username', 'quantity':'$quantity'}}}}
+    ]
+
+    orders = Order.objects.aggregate(*pipeline)
+    text = j2_env.get_template('all.html').render(orders=orders)
     bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
 
-
-
-def addOrder(bot, update):
-    # import ipdb ; ipdb.set_trace()
+def pill(bot, update):
     chat_id = str(update.message.chat.id)
     session = Session.get(chat_id=chat_id)
+
+    if not session:
+        text = 'No actice session, please start a new one'
+        bot.send_message(chat_id=chat_id, text=text)
+        return
+
+    pipeline = [
+        {'$match': {'session':session.id}},
+        {'$group':{'_id':{'username':'$username'}, 'pill':{'$sum':{'$multiply':["$price", "$quantity"]}}}}
+    ]
+
+    pill = Order.objects.aggregate(*pipeline)
+    text = j2_env.get_template('pill.html').render(pill=pill)
+    bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+
+def addOrder(bot, update):
+    chat_id = str(update.message.chat.id)
+    session = Session.get(chat_id=chat_id)
+    username = update.message.from_user.username
 
     if not session:
         update.message.reply_text('Please start a new session first')
         return
 
-    username = update.message.from_user.username
-    timestamp = time.time()
-    payload = update.message.text.replace('/add ', '')
+    if update.message.reply_to_message:
+        payload = update.message.reply_to_message.text.replace('/add', '')
+    else:
+        payload = update.message.text.replace('/add', '')
+
     orders = payload.split('+')
 
     for order_string in orders:
@@ -147,12 +153,6 @@ def addOrder(bot, update):
             )
             order_object.save()
 
-    
-            
-
-        
-
-        
 
 def main():
     updater = Updater(config['telegram']['token'])
@@ -163,6 +163,7 @@ def main():
     updater.dispatcher.add_handler(CommandHandler('set', setPrice))
     updater.dispatcher.add_handler(CommandHandler('me', myOrders))
     updater.dispatcher.add_handler(CommandHandler('all', allOrders))
+    updater.dispatcher.add_handler(CommandHandler('pill', pill))
 
     updater.start_polling()
     updater.idle()
@@ -176,7 +177,6 @@ if __name__ == '__main__':
     db = Database()
     db.connect(** config['database'])
 
-    # templates_dir = os.path.dirname(os.path.abspath(__file__) + '/templates')
     j2_env = Environment(loader=FileSystemLoader(searchpath='./templates'), trim_blocks=True)
 
     main()
