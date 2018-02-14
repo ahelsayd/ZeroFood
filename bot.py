@@ -157,8 +157,6 @@ def main():
     updater.dispatcher.add_handler(CommandHandler('me', myOrders))
     updater.dispatcher.add_handler(CommandHandler('all', allOrders))
     updater.dispatcher.add_handler(CommandHandler('pill', pill))
-    updater.dispatcher.add_handler(CommandHandler('delivery', setdelivery))
-    updater.dispatcher.add_handler(CommandHandler('tax', setTax))
 
     updater.start_polling()
     updater.idle()
