@@ -7,14 +7,10 @@ from jinja2 import Environment, FileSystemLoader
 def __get_order_details(order_string):
         order = ''
         quantity = None
-        price = None
         for word in order_string.split(' '):
-            #quantity & price
-            if word.isdigit():
-                if quantity:
-                    price = float(word)
-                else:
-                    quantity = int(word)
+            #quantity
+            if word.isdigit() and not quantity:
+                quantity = int(word)
             # order
             else:
                 if order:
@@ -23,7 +19,7 @@ def __get_order_details(order_string):
 
         quantity = quantity or 1
 
-        return quantity, order, price
+        return quantity, order
 
 def startSession(bot, update):
     chat_id = str(update.message.chat.id)
@@ -88,7 +84,7 @@ def allOrders(bot, update):
     text = j2_env.get_template('all.html').render(orders=orders)
     bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
 
-def pill(bot, update):
+def bill(bot, update):
     chat_id = str(update.message.chat.id)
     session = Session.get(chat_id=chat_id)
 
@@ -101,7 +97,7 @@ def pill(bot, update):
     ]
 
     pill = Order.objects.aggregate(*pipeline)
-    text = j2_env.get_template('pill.html').render(pill=pill)
+    text = j2_env.get_template('bill.html').render(pill=pill)
     bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
 
 def addOrder(bot, update):
@@ -120,12 +116,7 @@ def addOrder(bot, update):
     orders = payload.split('+')
 
     for order_string in orders:
-        quantity, order, price = __get_order_details(order_string.strip())
-
-        if not price:
-            exists_order_with_price = Order.get(session=session, order=order, price__ne=None)
-            if exists_order_with_price:
-                price = exists_order_with_price.price
+        quantity, order = __get_order_details(order_string.strip())
         
         exists_order = Order.get(
             session=session, 
@@ -134,17 +125,42 @@ def addOrder(bot, update):
         )
         
         if exists_order:
-            price = price or exists_order.price
-            exists_order.update(inc__quantity=quantity, price=price)
+            exists_order.update(inc__quantity=quantity)
         else: 
             order_object = Order(
                 session=session,
                 username=username,
                 quantity=quantity,
-                price=price,
                 order=order
             )
             order_object.save()
+
+def deleteOrder(bot, update):
+    chat_id = str(update.message.chat.id)
+    session = Session.get(chat_id=chat_id)
+    username = update.message.from_user.username
+
+    if not session:
+        return
+
+    if update.message.reply_to_message:
+        payload = update.message.reply_to_message.text.replace('/add', '')
+    else:
+        payload = update.message.text.replace('/delete', '')
+
+    orders = payload.split('+')
+
+    for order_string in orders:
+        quantity, order = __get_order_details(order_string.strip())
+        
+        quantity = abs(int(quantity))
+
+        order_obj = Order.get(session=session, username=username, order=order)
+        if order_obj:
+            if quantity >= order_obj.quantity:
+                order_obj.delete()
+            else:
+                order_obj.update(inc__quantity= -quantity)
 
 
 def main():
@@ -153,14 +169,14 @@ def main():
     updater.dispatcher.add_handler(CommandHandler('start', startSession))
     updater.dispatcher.add_handler(CommandHandler('end', endSession))
     updater.dispatcher.add_handler(CommandHandler('add', addOrder))
+    updater.dispatcher.add_handler(CommandHandler('delete', deleteOrder))
     updater.dispatcher.add_handler(CommandHandler('set', setPrice))
     updater.dispatcher.add_handler(CommandHandler('me', myOrders))
     updater.dispatcher.add_handler(CommandHandler('all', allOrders))
-    updater.dispatcher.add_handler(CommandHandler('pill', pill))
+    updater.dispatcher.add_handler(CommandHandler('bill', bill))
 
     updater.start_polling()
     updater.idle()
-
 
 if __name__ == '__main__':
 
