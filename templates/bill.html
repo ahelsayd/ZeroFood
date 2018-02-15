@@ -6,6 +6,8 @@
 {% else %}
 <b>Bill</b>
 {% for user in bill %}
-    @{{user._id.username}} <i>{{user.bill}}</i>
+    @{{user._id.username}} <i>{{user.bill + normalizedService + normalizedTax}}</i>
 {% endfor %}
+
+    <b>Service</b>: <i>{{totalService}}</i>     <b>Tax</b>: <i>{{totalTax}}</i>
 {% endif %}

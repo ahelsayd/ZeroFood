@@ -1,8 +1,15 @@
-import yaml, time, os
-from db import Database, Session, Order
+import yaml, time, os, mongoengine
+from db import Session, Order
 from telegram.ext import Updater, CommandHandler
 from telegram import ParseMode
 from jinja2 import Environment, FileSystemLoader
+
+def __isDigit(string):
+    try:
+        float(string)
+        return True
+    except ValueError:
+        return False
 
 def __get_order_details(order_string):
         order = ''
@@ -58,8 +65,32 @@ def setPrice(bot, update):
     orders = update.message.text.replace('/set ', '').split(',')
     for order in orders:
         order, price = [x.strip() for x in order.split('=')]
-        if price.isdigit():
+        if __isDigit(price):
+            price = abs(float(price))
             Order.objects(session=session, order=order).update(price=price)
+
+def setService(bot, update):
+    chat_id = str(update.message.chat.id)
+    session = Session.get(chat_id=chat_id)
+    if not session:
+        return
+
+    service = update.message.text.replace('/service ', '').strip()
+    if __isDigit(service):
+        service = abs(float(service))
+        session.update(service=service))
+
+def setTax(bot, update):
+    chat_id = str(update.message.chat.id)
+    session = Session.get(chat_id=chat_id)
+    if not session:
+        return
+        
+    tax = update.message.text.replace('/tax ', '').strip()
+    if __isDigit(tax):
+        tax = abs(float(tax))
+        session.update(tax=tax)
+    
 
 def myOrders(bot, update):
     chat_id = str(update.message.chat.id)
@@ -102,7 +133,9 @@ def allOrders(bot, update):
 def bill(bot, update):
     chat_id = str(update.message.chat.id)
     session = Session.get(chat_id=chat_id)
-
+    normalizedService = 0
+    normalizedTax = 0
+    
     if not session:
         return
 
@@ -113,14 +146,31 @@ def bill(bot, update):
         {
             '$group':{
                 '_id':{'username':'$username'},
-                'bill':{'$sum':{'$multiply':["$price", "$quantity"]}}
+                'bill':{'$sum':{'$multiply':["$price", "$quantity"]}},
             }
         }
     ]
 
     unknown_orders = Order.objects(price=None)
     bill = Order.objects.aggregate(*pipeline)
-    text = j2_env.get_template('bill.html').render(bill=bill, unknown_orders=unknown_orders)
+
+    totalService = session.service
+    totalTax = session.tax
+
+    numberOfPersons = len(Order.objects.distinct('username'))
+    
+    if numberOfPersons:
+        normalizedService = totalService / numberOfPersons
+        normalizedTax = totalTax / numberOfPersons
+
+    text = j2_env.get_template('bill.html').render(
+        bill=bill, 
+        unknown_orders=unknown_orders,
+        totalService=totalService,
+        totalTax=totalTax,
+        normalizedService=normalizedService,
+        normalizedTax=normalizedTax,
+    )
     bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
 
 def addOrder(bot, update):
@@ -140,6 +190,9 @@ def addOrder(bot, update):
 
     for order_string in orders:
         quantity, order = __get_order_details(order_string.strip())
+
+        if not order:
+            return
         
         exists_order = Order.get(
             session=session, 
@@ -187,31 +240,34 @@ def deleteOrder(bot, update):
 
 
 def main():
+    # handlers
     updater = Updater(config['telegram']['token'])
-    
     updater.dispatcher.add_handler(CommandHandler('start', startSession))
     updater.dispatcher.add_handler(CommandHandler('end', endSession))
     updater.dispatcher.add_handler(CommandHandler('add', addOrder))
     updater.dispatcher.add_handler(CommandHandler('delete', deleteOrder))
     updater.dispatcher.add_handler(CommandHandler('set', setPrice))
+    updater.dispatcher.add_handler(CommandHandler('service', setService))
+    updater.dispatcher.add_handler(CommandHandler('tax', setTax))
     updater.dispatcher.add_handler(CommandHandler('me', myOrders))
     updater.dispatcher.add_handler(CommandHandler('all', allOrders))
     updater.dispatcher.add_handler(CommandHandler('bill', bill))
     updater.dispatcher.add_handler(CommandHandler('help', showHelp))
-
     updater.start_polling()
     updater.idle()
 
 if __name__ == '__main__':
-
+     # load configrations 
     with open('config.yaml', 'r') as config_file:
         config = yaml.load(config_file)
 
-    db = Database()
-    db.connect(** config['database'])
+    # connect to db
+    mongoengine.connect(** config['database'])
 
+    # load templates
     j2_env = Environment(loader=FileSystemLoader(searchpath='./templates'), trim_blocks=True)
 
+    # start
     main()
 
     
