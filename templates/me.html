@@ -1,4 +1,5 @@
-<b>Your Orders</b>
+<b>Your orders</b>
+<pre>-------------------------------</pre>
 {% for order in orders %}
-    <i>{{order.quantity}}x</i>  <b>{{order.order}}</b>  <i>{{order.price or ''}}</i>
+<i>{{order.quantity}}x</i>  <b>{{order.order}}</b>  <i>{{order.price or ''}}</i>
 {% endfor %}

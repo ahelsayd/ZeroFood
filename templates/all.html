@@ -1,4 +1,5 @@
 <b>Orders</b>
+<pre>-------------------------------</pre>
 {% for order in orders %}
-    <i>{{order.quantity}}x</i>  <b>{{order._id.order}}</b>  <i>{{order.price or ''}}</i> {% for user in order.users %} @{{user.username}} ({{user.quantity}}) {% endfor %} 
+<i>{{order.quantity}}x</i>  <b>{{order._id.order}}</b>  <i>{{order.price or ''}}</i> {% for user in order.users %} @{{user.username}} ({{user.quantity}}) {% endfor %} 
 {% endfor %}
