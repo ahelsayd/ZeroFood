@@ -78,7 +78,7 @@ def setService(bot, update):
     service = update.message.text.replace('/service ', '').strip()
     if __isDigit(service):
         service = abs(float(service))
-        session.update(service=service))
+        session.update(service=service)
 
 def setTax(bot, update):
     chat_id = str(update.message.chat.id)
