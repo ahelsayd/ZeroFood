@@ -1,4 +1,11 @@
+{% if unknown_orders %}
+<b>Found {{unknown_orders|length}} order(s) with no price:</b>
+{% for order in unknown_orders %}
+    <i>{{order.order}}</i>
+{% endfor %} 
+{% else %}
 <b>Bill</b>
-{% for user in pill %}
-    @{{user._id.username}} <i>{{user.pill}}</i>
+{% for user in bill %}
+    @{{user._id.username}} <i>{{user.bill}}</i>
 {% endfor %}
+{% endif %}

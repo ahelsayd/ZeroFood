@@ -21,6 +21,11 @@ def __get_order_details(order_string):
 
         return quantity, order
 
+def showHelp(bot, update):
+    chat_id = str(update.message.chat.id)
+    text = j2_env.get_template('help.html').render()
+    bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+
 def startSession(bot, update):
     chat_id = str(update.message.chat.id)
     username = update.message.from_user.username
@@ -76,8 +81,18 @@ def allOrders(bot, update):
         return
 
     pipeline = [
-        {'$match': {'session':session.id}},
-        {'$group':{'_id':{'order':'$order'}, 'quantity':{'$sum': "$quantity"}, 'users':{'$push':{'username':'$username', 'quantity':'$quantity'}}}}
+        {'$match': {
+            'session':session.id
+            }
+        },
+        {
+            '$group':{
+                '_id':{'order':'$order'}, 
+                'quantity':{'$sum': "$quantity"}, 
+                'price':{'$first':'$price'}, 
+                'users':{'$push':{'username':'$username', 'quantity':'$quantity'}}
+            }
+        }
     ]
 
     orders = Order.objects.aggregate(*pipeline)
@@ -92,12 +107,20 @@ def bill(bot, update):
         return
 
     pipeline = [
-        {'$match': {'session':session.id}},
-        {'$group':{'_id':{'username':'$username'}, 'pill':{'$sum':{'$multiply':["$price", "$quantity"]}}}}
+        {
+            '$match': {'session':session.id}
+        },
+        {
+            '$group':{
+                '_id':{'username':'$username'},
+                'bill':{'$sum':{'$multiply':["$price", "$quantity"]}}
+            }
+        }
     ]
 
-    pill = Order.objects.aggregate(*pipeline)
-    text = j2_env.get_template('bill.html').render(pill=pill)
+    unknown_orders = Order.objects(price=None)
+    bill = Order.objects.aggregate(*pipeline)
+    text = j2_env.get_template('bill.html').render(bill=bill, unknown_orders=unknown_orders)
     bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
 
 def addOrder(bot, update):
@@ -174,6 +197,7 @@ def main():
     updater.dispatcher.add_handler(CommandHandler('me', myOrders))
     updater.dispatcher.add_handler(CommandHandler('all', allOrders))
     updater.dispatcher.add_handler(CommandHandler('bill', bill))
+    updater.dispatcher.add_handler(CommandHandler('help', showHelp))
 
     updater.start_polling()
     updater.idle()
