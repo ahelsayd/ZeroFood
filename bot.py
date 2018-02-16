@@ -5,6 +5,8 @@ from telegram import ParseMode
 from jinja2 import Environment, FileSystemLoader
 from functools import wraps
 
+# utils 
+
 def session_check(func):
     @wraps(func)
     def decorator(*args, **kwargs):
@@ -118,16 +120,13 @@ def my_orders(bot, update, session, **kwargs):
 
     username = kwargs.get('username')
     orders = Order.objects.filter(session=session, username=username)
-    msg = render_template('me.html', orders=orders, username=username)
+    msg = render_template('me.html', orders=orders)
     update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 @session_check
 def all_orders(bot, update, session, **kwargs):
     """ List all orders when command /all is issued """
     
-    chat_id = kwargs.get('chat_id')
-    username = kwargs.get('username')
-
     pipeline = [
         {'$match': {
             'session':session.id
@@ -195,7 +194,6 @@ def bill(bot, update, session, **kwargs):
 def add_order(bot, update, session, **kwargs):
     """ Add new order(s) when command /add is issued """
     
-    chat_id = kwargs.get('chat_id')
     username = kwargs.get('username')
 
     if update.message.reply_to_message:
@@ -255,6 +253,8 @@ def delete_order(bot, update, session, **kwargs):
                 order_obj.delete()
             else:
                 order_obj.update(inc__quantity= -quantity)
+
+# main
 
 def main():    
     
