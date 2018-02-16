@@ -1,14 +1,13 @@
 <b>Bill</b>
-<pre>-------------------------------</pre>
 {% if unknown_orders %}
-<b>Found {{unknown_orders|length}} order(s) with no price:</b>
+    <b>Found {{unknown_orders|length}} order(s) with no price:</b>
 {% for order in unknown_orders %}
-<i>{{order.order}}</i>
+    <i>{{order.order}}</i>
 {% endfor %} 
 {% else %}
 {% for user in bill %}
-@{{user._id.username}} <i>{{user.bill + normalized_service + normalized_tax}}</i>
+    @{{user._id.username}}  <i>{{user.total}}</i>
 {% endfor %}
 
-<b>Service</b>: <i>{{total_service}}</i>     <b>Tax</b>: <i>{{total_tax}}</i>
+    <b>Service</b>: <i>{{service}}</i>     <b>Tax</b>: <i>{{tax}}</i>
 {% endif %}

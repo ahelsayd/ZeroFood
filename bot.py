@@ -165,8 +165,14 @@ def bill(bot, update, **kwargs):
 
     normalized_service = 0
     normalized_tax = 0
-    total_service = session.service
-    total_tax = session.tax
+    service = session.service
+    tax = session.tax
+
+    number_of_users = len(Order.objects.distinct('username'))
+
+    if number_of_users:
+        normalized_service = service / number_of_users
+        normalized_tax = tax / number_of_users
 
     pipeline = [
         {
@@ -175,7 +181,12 @@ def bill(bot, update, **kwargs):
         {
             '$group':{
                 '_id':{'username':'$username'},
-                'bill':{'$sum':{'$multiply':["$price", "$quantity"]}},
+                'net':{'$sum':{'$multiply':["$price", "$quantity"]}},
+            }
+        },
+        {
+            '$addFields':{
+                'total':{'$add':['$net', normalized_service, normalized_tax]}
             }
         }
     ]
@@ -183,20 +194,12 @@ def bill(bot, update, **kwargs):
     unknown_orders = Order.objects(price=None)
     bill = Order.objects.aggregate(*pipeline)
 
-    number_of_persons = len(Order.objects.distinct('username'))
-    
-    if number_of_persons:
-        normalized_service = total_service / number_of_persons
-        normalized_tax = total_tax / number_of_persons
-
     msg = render_template(
         'bill.html',
         bill=bill, 
         unknown_orders=unknown_orders,
-        total_service=total_service,
-        total_tax=total_tax,
-        normalized_service=normalized_service,
-        normalized_tax=normalized_tax,
+        service=service,
+        tax=tax,
     )
     update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
