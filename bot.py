@@ -5,8 +5,6 @@ from telegram import ParseMode
 from jinja2 import Environment, FileSystemLoader
 from functools import wraps
 
-# tools
-
 def session_check(func):
     @wraps(func)
     def decorator(*args, **kwargs):
@@ -78,18 +76,16 @@ def start_session(bot, update):
     update.message.reply_text('New session is started')
 
 @session_check
-def end_session(bot, update, **kwargs):
+def end_session(bot, update, session, **kwargs):
     """ End active session when command /end is issued """
 
-    session = kwargs.get('session')
     session.delete()
     update.message.reply_text('Session is ended')
 
 @session_check
-def set_price(bot, update, **kwargs):
+def set_price(bot, update, session, **kwargs):
     """ Set order price when command /set <order> = <price> is issued """
 
-    session = kwargs.get('session')
     orders = update.message.text.replace('/set ', '').split(',')
 
     for order in orders:
@@ -99,42 +95,37 @@ def set_price(bot, update, **kwargs):
             Order.objects(session=session, order=order).update(price=price)
 
 @session_check
-def set_service(bot, update, **kwargs):
+def set_service(bot, update, session, **kwargs):
     """ Set service when command /service is issued """
 
-    session = kwargs.get('session')
     service = update.message.text.replace('/service ', '').strip()
     if is_digit(service):
         service = abs(float(service))
         session.update(service=service)
 
 @session_check
-def set_tax(bot, update, **kwargs):
+def set_tax(bot, update, session, **kwargs):
     """ Set tax when command /tax is issued """
 
-    session = kwargs.get('session')
     tax = update.message.text.replace('/tax ', '').strip()
     if is_digit(tax):
         tax = abs(float(tax))
         session.update(tax=tax)
         
 @session_check
-def my_orders(bot, update, **kwargs):
+def my_orders(bot, update, session, **kwargs):
     """ List user's orders when command /me is issued """
 
-    session = kwargs.get('session')
     username = kwargs.get('username')
-
     orders = Order.objects.filter(session=session, username=username)
     msg = render_template('me.html', orders=orders, username=username)
     update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 @session_check
-def all_orders(bot, update, **kwargs):
+def all_orders(bot, update, session, **kwargs):
     """ List all orders when command /all is issued """
     
     chat_id = kwargs.get('chat_id')
-    session = kwargs.get('session')
     username = kwargs.get('username')
 
     pipeline = [
@@ -157,12 +148,9 @@ def all_orders(bot, update, **kwargs):
     update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 @session_check
-def bill(bot, update, **kwargs):
+def bill(bot, update, session, **kwargs):
     """ Show bill when command /bill is issued """
     
-    chat_id = kwargs.get('chat_id')
-    session = kwargs.get('session')
-
     normalized_service = 0
     normalized_tax = 0
     service = session.service
@@ -204,11 +192,10 @@ def bill(bot, update, **kwargs):
     update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 @session_check
-def add_order(bot, update, **kwargs):
+def add_order(bot, update, session, **kwargs):
     """ Add new order(s) when command /add is issued """
     
     chat_id = kwargs.get('chat_id')
-    session = kwargs.get('session')
     username = kwargs.get('username')
 
     if update.message.reply_to_message:
@@ -243,10 +230,9 @@ def add_order(bot, update, **kwargs):
             order_object.save()
 
 @session_check
-def delete_order(bot, update, **kwargs):
+def delete_order(bot, update, session, **kwargs):
     """ Delete order(s) when command /delete is issued """
     
-    session = kwargs.get('session')
     username = kwargs.get('username')
     
     if update.message.reply_to_message:
