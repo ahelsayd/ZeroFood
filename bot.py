@@ -177,7 +177,7 @@ def bill(bot, update, session, **kwargs):
         }
     ]
 
-    unknown_orders = Order.objects(price=None)
+    unknown_orders = Order.objects(session=session, price=None)
     bill = Order.objects.aggregate(*pipeline)
 
     msg = render_template(
