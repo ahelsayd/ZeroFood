@@ -58,7 +58,6 @@ def render_template(template, **kwargs):
 def show_help(bot, update):
     """ Show help message when command /help is issued """
 
-    chat_id = str(update.message.chat.id)
     msg = render_template('help.html')
     update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
