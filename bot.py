@@ -7,7 +7,7 @@ from functools import wraps
 
 # utils 
 
-def session_check(func):
+def check_session(func):
     @wraps(func)
     def decorator(*args, **kwargs):
         bot, update = args
@@ -58,8 +58,9 @@ def render_template(template, **kwargs):
 def show_help(bot, update):
     """ Show help message when command /help is issued """
 
-    msg = render_template('help.html')
-    update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    chat_id = str(update.message.chat.id)
+    text = render_template('help.html')
+    bot.send_message(text=text, chat_id=chat_id, parse_mode=ParseMode.HTML)
 
 def start_session(bot, update):
     """ Start new session when command /start is issued """
@@ -74,16 +75,17 @@ def start_session(bot, update):
     session = Session(chat_id=chat_id, created_by=username)
     session.save()
     
-    update.message.reply_text('New session is started')
+    bot.send_message(text='New session is started', chat_id=chat_id)
 
-@session_check
+@check_session
 def end_session(bot, update, session, **kwargs):
     """ End active session when command /end is issued """
 
     session.delete()
-    update.message.reply_text('Session is ended')
+    chat_id = kwargs.get('chat_id')
+    bot.send_message(text='Session is ended', chat_id=chat_id)
 
-@session_check
+@check_session
 def set_price(bot, update, session, **kwargs):
     """ Set order price when command /set <order> = <price> is issued """
 
@@ -95,7 +97,7 @@ def set_price(bot, update, session, **kwargs):
             price = abs(float(price))
             Order.objects(session=session, order=order).update(price=price)
 
-@session_check
+@check_session
 def set_service(bot, update, session, **kwargs):
     """ Set service when command /service is issued """
 
@@ -104,7 +106,7 @@ def set_service(bot, update, session, **kwargs):
         service = abs(float(service))
         session.update(service=service)
 
-@session_check
+@check_session
 def set_tax(bot, update, session, **kwargs):
     """ Set tax when command /tax is issued """
 
@@ -113,7 +115,7 @@ def set_tax(bot, update, session, **kwargs):
         tax = abs(float(tax))
         session.update(tax=tax)
         
-@session_check
+@check_session
 def my_orders(bot, update, session, **kwargs):
     """ List user's orders when command /me is issued """
 
@@ -122,7 +124,7 @@ def my_orders(bot, update, session, **kwargs):
     msg = render_template('me.html', orders=orders)
     update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
-@session_check
+@check_session
 def all_orders(bot, update, session, **kwargs):
     """ List all orders when command /all is issued """
     
@@ -142,10 +144,10 @@ def all_orders(bot, update, session, **kwargs):
     ]
 
     orders = Order.objects.aggregate(*pipeline)
-    msg = render_template('all.html', orders=orders)
-    update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    text = render_template('all.html', orders=orders)
+    bot.send_message(text=text, chat_id=session.chat_id, parse_mode=ParseMode.HTML)
 
-@session_check
+@check_session
 def bill(bot, update, session, **kwargs):
     """ Show bill when command /bill is issued """
     
@@ -180,27 +182,27 @@ def bill(bot, update, session, **kwargs):
     unknown_orders = Order.objects(session=session, price=None)
     bill = Order.objects.aggregate(*pipeline)
 
-    msg = render_template(
+    text = render_template(
         'bill.html',
         bill=bill, 
         unknown_orders=unknown_orders,
         service=service,
         tax=tax,
     )
-    update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    bot.send_message(text=text, chat_id=session.chat_id, parse_mode=ParseMode.HTML)
 
-@session_check
+@check_session
 def add_order(bot, update, session, **kwargs):
     """ Add new order(s) when command /add is issued """
     
     username = kwargs.get('username')
 
     if update.message.reply_to_message:
-        payload = update.message.reply_to_message.text.replace('/add', '')
+        payload = update.message.reply_to_message.text
     else:
-        payload = update.message.text.replace('/add', '')
+        payload = update.message.text
 
-    orders = payload.split('+')
+    orders = payload.replace('/add', '').split('+')
 
     for order_string in orders:
         quantity, order = extract_order_details(order_string.strip())
@@ -226,7 +228,7 @@ def add_order(bot, update, session, **kwargs):
                                  order=order)
             order_object.save()
 
-@session_check
+@check_session
 def delete_order(bot, update, session, **kwargs):
     """ Delete order(s) when command /delete is issued """
     
