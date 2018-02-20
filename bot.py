@@ -4,6 +4,7 @@ from telegram.ext import Updater, CommandHandler
 from telegram import ParseMode
 from jinja2 import Environment, FileSystemLoader
 from functools import wraps
+from difflib import get_close_matches
 
 # utils 
 
@@ -35,23 +36,38 @@ def is_digit(string):
     except ValueError:
         return False
 
-def extract_order_details(order_string):
+def extract_order_details(order_string, session):
         order = ''
         quantity = None
+        orders_db = []
+
+        all_orders = Order.objects(session=session)
+        for item in all_orders:
+            orders_db.extend(item.order.split())
+        
         for word in order_string.split(' '):
             if word.isdigit() and not quantity:
                 quantity = int(word)
             else:
                 if order:
                     order += ' '
-                order += word
+                
+                closest_matches = get_close_matches(word, set(list(orders_db)))
+
+                if closest_matches:
+                    order += closest_matches[0]
+                else:
+                    order += word
 
         quantity = quantity or 1
-
         return quantity, order
 
 def render_template(template, **kwargs):
     return j2_env.get_template(template).render(**kwargs)
+
+def round_to_payable_unit(value):
+    resolution = 0.25
+    return round(float(value) / resolution) * resolution
 
 # handlers
 
@@ -205,7 +221,7 @@ def add_order(bot, update, session, **kwargs):
     orders = payload.replace('/add', '').split('+')
 
     for order_string in orders:
-        quantity, order = extract_order_details(order_string.strip())
+        quantity, order = extract_order_details(order_string.strip(), session)
 
         if not order:
             update.message.reply_text('Invalid order')
@@ -242,7 +258,7 @@ def delete_order(bot, update, session, **kwargs):
     orders = payload.split('+')
 
     for order_string in orders:
-        quantity, order = extract_order_details(order_string.strip())
+        quantity, order = extract_order_details(order_string.strip(), session)
         quantity = abs(int(quantity))
 
         order_obj = Order.get(session=session, 
@@ -292,6 +308,7 @@ if __name__ == '__main__':
 
     # load templates
     j2_env = Environment(loader=FileSystemLoader(searchpath='./templates'), trim_blocks=True)
+    j2_env.globals.update(round_to_payable_unit=round_to_payable_unit)
 
     # start
     main()
