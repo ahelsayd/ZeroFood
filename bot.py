@@ -1,4 +1,4 @@
-import yaml, os, mongoengine
+import yaml, os, mongoengine, re
 from db import Session, Order
 from telegram.ext import Updater, CommandHandler
 from telegram import ParseMode
@@ -45,7 +45,7 @@ def extract_order_details(order_string, session):
         for item in all_orders:
             orders_db.extend(item.order.split())
         
-        for word in order_string.split(' '):
+        for word in order_string.split():
             if word.isdigit() and not quantity:
                 quantity = int(word)
             else:
@@ -218,7 +218,9 @@ def add_order(bot, update, session, **kwargs):
     else:
         payload = update.message.text
 
-    orders = payload.replace('/add', '').split('+')
+    pattern = '(/add|@{})'.format(config['telegram']['username'])
+    regex = re.compile(pattern, re.IGNORECASE)
+    orders = regex.sub('', payload).split('+')
 
     for order_string in orders:
         quantity, order = extract_order_details(order_string.strip(), session)
