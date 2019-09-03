@@ -1,7 +1,8 @@
 from mongoengine import fields, Document, DoesNotExist
 
+
 class DBModel(Document):
-    meta = {'allow_inheritance': True, 'abstract': True}
+    meta = {"allow_inheritance": True, "abstract": True}
 
     @classmethod
     def get(cls, **kwargs):
@@ -10,12 +11,14 @@ class DBModel(Document):
         except DoesNotExist:
             return None
 
+
 class Session(DBModel):
     chat_id = fields.StringField(unique=True, required=True)
     created_by = fields.StringField(required=True)
     service = fields.FloatField(default=0)
     tax = fields.FloatField(default=0)
-    meta = {"collection":"sessions"}
+    meta = {"collection": "sessions"}
+
 
 class Order(DBModel):
     session = fields.ReferenceField(Session, required=True, reverse_delete_rule=2)
@@ -23,4 +26,4 @@ class Order(DBModel):
     order = fields.StringField(required=True)
     quantity = fields.IntField(default=1)
     price = fields.FloatField(default=None)
-    meta = {"collection":"orders"}
+    meta = {"collection": "orders"}
