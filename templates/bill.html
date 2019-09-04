@@ -1,13 +1,6 @@
-<b>Bill</b>
-{% if unknown_orders %}
-    <b>Found {{unknown_orders|length}} order(s) with no price:</b>
-{% for order in unknown_orders %}
-    <i>{{order.order}}</i>
-{% endfor %} 
-{% else %}
-{% for user in bill %}
-    @{{user._id.username}}  <i>{{round_to_payable_unit(user.total)}}</i>
-{% endfor %}
 
-    <b>Service</b>: <i>{{service}}</i>     <b>Tax</b>: <i>{{tax}}</i>
-{% endif %}
+<b>Bill</b>
+{% for user in bill %}
+@{{user._id.username}}  <i>{{round_to_payable_unit(user.total)}}</i>
+{% endfor %}
+<b>Service</b>: <i>{{service}}</i>     <b>Tax</b>: <i>{{tax}}</i>

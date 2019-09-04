@@ -1,28 +1,51 @@
 import yaml, os, mongoengine, re
-from db import Session, Order
-from telegram.ext import Updater, CommandHandler
-from telegram import ParseMode
+from db import Session, Order, UserSession
+from telegram.ext import (
+    Updater,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    Filters,
+)
+from telegram import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 from jinja2 import Environment, FileSystemLoader
 from functools import wraps
 from difflib import get_close_matches
 
-# utils
+
+ORDER_URL = "https://telegram.me/otlobbot?start={chat_id}"
 
 
-def check_session(func):
+def private(func):
     @wraps(func)
     def decorator(*args, **kwargs):
         bot, update = args
-        chat_id = str(update.message.chat_id)
-        username = update.message.from_user.username
-        session = Session.get(chat_id=chat_id)
-
-        if not session:
-            update.message.reply_text("No active session, please start a new one")
+        username = update.effective_user.username
+        chat_id = update.effective_message.chat.id
+        user_session = UserSession.get(username=username)
+        if not user_session:
+            update.message.reply_text("No active session")
             return
 
-        kwargs.update(chat_id=chat_id, username=username, session=session)
+        session = user_session.session
+        kwargs.update(session=session, username=username, chat_id=chat_id)
+        return func(*args, **kwargs)
 
+    return decorator
+
+
+def group(func):
+    @wraps(func)
+    def decorator(*args, **kwargs):
+        bot, update = args
+        username = update.effective_user.username
+        chat_id = str(update.effective_message.chat.id)
+        session = Session.get(chat_id=chat_id)
+        if not session:
+            update.message.reply_text("No active session")
+            return
+
+        kwargs.update(session=session, username=username, chat_id=chat_id)
         return func(*args, **kwargs)
 
     return decorator
@@ -34,6 +57,32 @@ def is_digit(string):
         return True
     except ValueError:
         return False
+
+
+def add_order_handler(message, username, session):
+    orders = message.text.strip().split("+")
+    for order_string in orders:
+        quantity, order = extract_order_details(order_string.strip(), session)
+        if not order:
+            return False
+
+        price = None
+        ex_order = Order.objects(
+            session=session, username=username, order=order
+        ).first()
+        if ex_order:
+            price = ex_order.price
+
+        Order(
+            session=session,
+            username=username,
+            quantity=quantity,
+            order=order,
+            message_id=message.message_id,
+            price=price,
+        ).save()
+
+    return True
 
 
 def extract_order_details(order_string, session):
@@ -53,7 +102,6 @@ def extract_order_details(order_string, session):
                 order += " "
 
             closest_matches = get_close_matches(word, set(list(orders_db)))
-
             if closest_matches:
                 order += closest_matches[0]
             else:
@@ -72,250 +120,269 @@ def round_to_payable_unit(value):
     return round(float(value) / resolution) * resolution
 
 
+def all_orders(update, session, **kwargs):
+    """
+    List all orders when command /all is issued
+    """
+    pipeline = [
+        {"$match": {"session": session.id}},
+        {
+            "$group": {
+                "_id": {"order": "$order", "username": "$username"},
+                "quantity": {"$sum": "$quantity"},
+                "price": {"$first": "$price"},
+            }
+        },
+        {
+            "$group": {
+                "_id": "$_id.order",
+                "users": {
+                    "$push": {
+                        "username": "$_id.username",
+                        "quantity": {"$sum": "$quantity"},
+                    }
+                },
+                "quantity": {"$sum": "$quantity"},
+                "price": {"$first": "$price"},
+            }
+        },
+    ]
+    orders = Order.objects.aggregate(*pipeline)
+    return orders
+
+
+def update_orders_list(bot, update, session):
+    orders = all_orders(update, session)
+    text = render_template("all.html", orders=orders)
+    bot.edit_message_text(
+        chat_id=session.chat_id,
+        message_id=session.orders_message_id,
+        text=text,
+        parse_mode=ParseMode.HTML,
+    )
+
+
 # handlers
-
-
 def show_help(bot, update):
-    """ Show help message when command /help is issued """
-
-    chat_id = str(update.message.chat.id)
+    """
+    Show help message when command /help is issued
+    """
+    chat_id = str(update.effective_message.chat.id)
     text = render_template("help.html")
     bot.send_message(text=text, chat_id=chat_id, parse_mode=ParseMode.HTML)
 
 
-def start_session(bot, update):
-    """ Start new session when command /start is issued """
+def start(bot, update):
+    chat = update.effective_chat
+    username = update.effective_user.username
+    message = update.effective_message.text
+    reply_markup = None
 
-    chat_id = str(update.message.chat.id)
-    username = update.message.from_user.username
+    if chat.type == "private":
+        payload = message.replace("/start", "").strip()
+        if not payload:
+            update.message.reply_text(
+                "Invalid session, Please press on 'Add Order' button in the group message"
+            )
+            return
 
-    if Session.get(chat_id=chat_id):
-        update.message.reply_text("A session is already started")
-        return
+        chat_id = payload
+        session = Session.get(chat_id=chat_id)
+        if not session:
+            update.message.reply_text("Session is not active")
+            return
 
-    session = Session(chat_id=chat_id, created_by=username)
-    session.save()
+        user_session = UserSession.get(username=username)
+        if not user_session:
+            user_session = UserSession(session=session, username=username)
+            user_session.save()
 
-    bot.send_message(text="New session is started", chat_id=chat_id)
+    else:
+        chat_id = str(chat.id)
+        session = Session.get(chat_id=chat_id)
+        if session:
+            update.message.reply_text("Session is already active")
+            return
+
+        session = Session(chat_id=chat_id, created_by=username)
+        session.save()
+        button_list = [
+            InlineKeyboardButton("🍔 Add Order", url=ORDER_URL.format(chat_id=chat_id)),
+            InlineKeyboardButton("💰 Bill", callback_data="bill"),
+        ]
+
+        reply_markup = InlineKeyboardMarkup([button_list])
+        bot.send_message(
+            text="New session is started, Click on Add order to place your orders",
+            chat_id=chat_id,
+            reply_markup=reply_markup,
+        )
+
+        orders = []
+        text = render_template("all.html", orders=orders)
+        orders_message = bot.send_message(
+            text=text, chat_id=session.chat_id, parse_mode=ParseMode.HTML
+        )
+        session.update(orders_message_id=orders_message.message_id)
 
 
-@check_session
-def end_session(bot, update, session, **kwargs):
-    """ End active session when command /end is issued """
-
+@group
+def end(bot, update, session, **kwargs):
+    """
+    End active session when command /end is issued
+    """
     session.delete()
     chat_id = kwargs.get("chat_id")
     bot.send_message(text="Session is ended", chat_id=chat_id)
 
 
-@check_session
-def set_price(bot, update, session, **kwargs):
-    """ Set order price when command /set <order> = <price> is issued """
+@group
+def set_items_values(bot, update, session, **kwargs):
+    """
+    Set items values (orders, tax and service)
+    """
+    message = update.message.reply_to_message
+    if message.message_id == session.values_message_id:
+        items = message.text.splitlines()[2:]
+        orders = items[:-2]
+        values = update.message.text.strip().split()
 
-    orders = update.message.text.replace("/set ", "").split(",")
+        if not all([is_digit(v) for v in values]):
+            return update.message.reply_text(
+                "Invalid input, all values must be numerical"
+            )
 
-    for order in orders:
-        order, price = [x.strip() for x in order.split("=")]
-        if is_digit(price):
-            price = abs(float(price))
-            Order.objects(session=session, order=order).update(price=price)
+        if len(values) != len(items):
+            return update.message.reply_text(
+                "Invalid input, expected %s values but got %s"
+                % (len(items), len(values))
+            )
 
+        for i, order in enumerate(orders):
+            price = float(values[i])
+            Order.objects(session=session, order=order).update(price=price, multi=True)
 
-@check_session
-def set_service(bot, update, session, **kwargs):
-    """ Set service when command /service is issued """
-
-    service = update.message.text.replace("/service ", "").strip()
-    if is_digit(service):
-        service = abs(float(service))
-        session.update(service=service)
-
-
-@check_session
-def set_tax(bot, update, session, **kwargs):
-    """ Set tax when command /tax is issued """
-
-    tax = update.message.text.replace("/tax ", "").strip()
-    if is_digit(tax):
-        tax = abs(float(tax))
-        session.update(tax=tax)
+        session.update(tax=values[-2], service=values[-1])
+        update_orders_list(bot, update, session)
+        bill(bot, update)
 
 
-@check_session
-def my_orders(bot, update, session, **kwargs):
-    """ List user's orders when command /me is issued """
+@group
+def bill(bot, update, session, **kwargs):
+    """
+    Show bill when command /bill is issued
+    """
+    orders_with_no_price = Order.objects(session=session, price=None).order_by("id")
+    if orders_with_no_price:
+        text = render_template("prices.html", orders=orders_with_no_price)
+        message = bot.send_message(
+            text=text,
+            chat_id=session.chat_id,
+            parse_mode=ParseMode.HTML,
+            reply_markup=ForceReply(),
+        )
+        session.update(values_message_id=message.message_id)
+    else:
+        normalized_service = 0
+        normalized_tax = 0
+        service = session.service
+        tax = session.tax
 
-    username = kwargs.get("username")
-    orders = Order.objects.filter(session=session, username=username)
-    msg = render_template("me.html", orders=orders)
-    update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+        number_of_users = len(Order.objects.distinct("username"))
+        if number_of_users:
+            normalized_service = service / number_of_users
+            normalized_tax = tax / number_of_users
+
+        pipeline = [
+            {"$match": {"session": session.id}},
+            {
+                "$group": {
+                    "_id": {"username": "$username"},
+                    "net": {"$sum": {"$multiply": ["$price", "$quantity"]}},
+                }
+            },
+            {
+                "$addFields": {
+                    "total": {"$add": ["$net", normalized_service, normalized_tax]}
+                }
+            },
+        ]
+        bill = Order.objects.aggregate(*pipeline)
+        text = render_template("bill.html", bill=bill, service=service, tax=tax)
+        bot.send_message(text=text, chat_id=session.chat_id, parse_mode=ParseMode.HTML)
 
 
-@check_session
-def all_orders(bot, update, session, **kwargs):
-    """ List all orders when command /all is issued """
-
+@private
+def my_orders(bot, update, session, username, chat_id, **kwargs):
+    """
+    List user's orders when command /me is issued
+    """
     pipeline = [
-        {"$match": {"session": session.id}},
+        {"$match": {"session": session.id, "username": username}},
         {
             "$group": {
                 "_id": {"order": "$order"},
                 "quantity": {"$sum": "$quantity"},
                 "price": {"$first": "$price"},
-                "users": {"$push": {"username": "$username", "quantity": "$quantity"}},
             }
         },
     ]
-
     orders = Order.objects.aggregate(*pipeline)
-    text = render_template("all.html", orders=orders)
-    bot.send_message(text=text, chat_id=session.chat_id, parse_mode=ParseMode.HTML)
+    msg = render_template("me.html", orders=orders)
+    update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-@check_session
-def bill(bot, update, session, **kwargs):
-    """ Show bill when command /bill is issued """
+@private
+def add_order(bot, update, session, username, **kwargs):
+    """
+    Add new order(s) when command /add is issued
+    """
+    message = update.effective_message
+    if not add_order_handler(message, username, session):
+        update.message.reply_text("Invalid order")
 
-    normalized_service = 0
-    normalized_tax = 0
-    service = session.service
-    tax = session.tax
-
-    number_of_users = len(Order.objects.distinct("username"))
-
-    if number_of_users:
-        normalized_service = service / number_of_users
-        normalized_tax = tax / number_of_users
-
-    pipeline = [
-        {"$match": {"session": session.id}},
-        {
-            "$group": {
-                "_id": {"username": "$username"},
-                "net": {"$sum": {"$multiply": ["$price", "$quantity"]}},
-            }
-        },
-        {
-            "$addFields": {
-                "total": {"$add": ["$net", normalized_service, normalized_tax]}
-            }
-        },
-    ]
-
-    unknown_orders = Order.objects(session=session, price=None)
-    bill = Order.objects.aggregate(*pipeline)
-
-    text = render_template(
-        "bill.html", bill=bill, unknown_orders=unknown_orders, service=service, tax=tax
-    )
-    bot.send_message(text=text, chat_id=session.chat_id, parse_mode=ParseMode.HTML)
+    update_orders_list(bot, update, session)
 
 
-@check_session
-def add_order(bot, update, session, **kwargs):
-    """ Add new order(s) when command /add is issued """
+@private
+def update_order(bot, update, session, username, **kwargs):
+    message = update.effective_message
+    Order.objects(message_id=message.message_id).delete()
+    if not add_order_handler(message, username, session):
+        update.message.reply_text("Invalid order")
 
-    username = kwargs.get("username")
-
-    if update.message.reply_to_message:
-        payload = update.message.reply_to_message.text
-    else:
-        payload = update.message.text
-
-    pattern = "(/add|@{})".format(config["telegram"]["username"])
-    regex = re.compile(pattern, re.IGNORECASE)
-    orders = regex.sub("", payload).split("+")
-
-    for order_string in orders:
-        quantity, order = extract_order_details(order_string.strip(), session)
-
-        if not order:
-            update.message.reply_text("Invalid order")
-            return
-
-        # check if the order exists in user's order
-        exists_order = Order.get(session=session, username=username, order=order)
-
-        # if the order exists in user's order, increment quantity
-        if exists_order:
-            exists_order.update(inc__quantity=quantity)
-
-        # else, record the new order
-        else:
-            order_object = Order(
-                session=session, username=username, quantity=quantity, order=order
-            )
-            order_object.save()
+    update_orders_list(bot, update, session)
 
 
-@check_session
-def delete_order(bot, update, session, **kwargs):
-    """ Delete order(s) when command /delete is issued """
-
-    username = kwargs.get("username")
-
-    if update.message.reply_to_message:
-        payload = update.message.reply_to_message.text.replace("/add", "")
-    else:
-        payload = update.message.text.replace("/delete", "")
-
-    orders = payload.split("+")
-
-    for order_string in orders:
-        quantity, order = extract_order_details(order_string.strip(), session)
-        quantity = abs(int(quantity))
-
-        order_obj = Order.get(session=session, username=username, order=order)
-
-        if order_obj:
-            if quantity >= order_obj.quantity:
-                order_obj.delete()
-            else:
-                order_obj.update(inc__quantity=-quantity)
-
-
-# main
+def callback_query_handler(bot, update):
+    data = update.callback_query.data
+    if data == "bill":
+        bill(bot, update)
 
 
 def main():
-
-    updater = Updater(config["telegram"]["token"])
-
+    updater = Updater(config["telegram"]["token"], use_context=False)
     dp = updater.dispatcher
-
-    # handlers
-
-    dp.add_handler(CommandHandler("start", start_session))
-    dp.add_handler(CommandHandler("end", end_session))
-    dp.add_handler(CommandHandler("add", add_order))
-    dp.add_handler(CommandHandler("delete", delete_order))
-    dp.add_handler(CommandHandler("set", set_price))
-    dp.add_handler(CommandHandler("service", set_service))
-    dp.add_handler(CommandHandler("tax", set_tax))
-    dp.add_handler(CommandHandler("me", my_orders))
-    dp.add_handler(CommandHandler("all", all_orders))
-    dp.add_handler(CommandHandler("bill", bill))
     dp.add_handler(CommandHandler("help", show_help))
-
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("end", end))
+    dp.add_handler(MessageHandler(Filters.private & Filters.update.message, add_order))
+    dp.add_handler(
+        MessageHandler(Filters.private & Filters.update.edited_message, update_order)
+    )
+    dp.add_handler(MessageHandler(Filters.reply, set_items_values))
+    dp.add_handler(CallbackQueryHandler(callback_query_handler))
     updater.start_polling()
-
     updater.idle()
 
 
 if __name__ == "__main__":
-
-    # load configrations
     with open("config.yaml", "r") as config_file:
-        config = yaml.load(config_file)
+        config = yaml.safe_load(config_file)
 
-    # connect to db
     mongoengine.connect(**config["database"])
-
-    # load templates
     j2_env = Environment(
         loader=FileSystemLoader(searchpath="./templates"), trim_blocks=True
     )
     j2_env.globals.update(round_to_payable_unit=round_to_payable_unit)
-
-    # start
     main()
