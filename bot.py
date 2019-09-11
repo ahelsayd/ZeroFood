@@ -162,7 +162,6 @@ def update_orders_list(bot, update, session):
     )
 
 
-# handlers
 def show_help(bot, update):
     """
     Show help message when command /help is issued
@@ -208,6 +207,7 @@ def start(bot, update):
         session.save()
         button_list = [
             InlineKeyboardButton("🍔 Add Order", url=ORDER_URL.format(chat_id=chat_id)),
+            InlineKeyboardButton("💰 Bill", callback_data="session-status"),
             InlineKeyboardButton("💰 Bill", callback_data="bill"),
         ]
 
@@ -242,7 +242,7 @@ def set_items_values(bot, update, session, **kwargs):
     Set items values (orders, tax and service)
     """
     message = update.message.reply_to_message
-    if message.message_id == session.values_message_id:
+    if message.message_id == session.orders_message_id:
         items = message.text.splitlines()[2:]
         orders = items[:-2]
         values = update.message.text.strip().split()
@@ -274,14 +274,13 @@ def bill(bot, update, session, **kwargs):
     """
     orders_with_no_price = Order.objects(session=session, price=None).order_by("id")
     if orders_with_no_price:
-        text = render_template("prices.html", orders=orders_with_no_price)
-        message = bot.send_message(
-            text=text,
-            chat_id=session.chat_id,
-            parse_mode=ParseMode.HTML,
-            reply_markup=ForceReply(),
+        text = """
+        Found {} items without price, use /set command to set them, also you can set the tax and service using the same command
+        """.format(
+            len(orders_with_no_price)
         )
-        session.update(values_message_id=message.message_id)
+        bot.answer_callback_query(update.callback_query.id, text=text, show_alert=True)
+
     else:
         normalized_service = 0
         normalized_tax = 0
@@ -337,6 +336,9 @@ def add_order(bot, update, session, username, **kwargs):
     """
     Add new order(s) when command /add is issued
     """
+    if not session.is_open:
+        update.message.reply_text("You can't order at this time")
+
     message = update.effective_message
     if not add_order_handler(message, username, session):
         update.message.reply_text("Invalid order")
@@ -346,18 +348,43 @@ def add_order(bot, update, session, username, **kwargs):
 
 @private
 def update_order(bot, update, session, username, **kwargs):
+    if not session.is_open:
+        update.message.reply_text("You can't edit your order(s) at this time")
+
     message = update.effective_message
-    Order.objects(message_id=message.message_id).delete()
+    Order.objects(message_id=message.message_id, username=username).delete()
     if not add_order_handler(message, username, session):
         update.message.reply_text("Invalid order")
 
     update_orders_list(bot, update, session)
 
 
+@private
+def delete_order(bot, update, session, username, **kwargs):
+    """
+    Delete order(s) when command /delete is issued
+    """
+    if not session.is_open:
+        update.message.reply_text("You can't delete your order(s) at this time")
+
+    message = update.message.reply_to_message
+    if message:
+        Order.objects(message_id=message.message_id, username=username).delete()
+        update_orders_list(bot, update, session)
+
+
+@group
+def toggle_session_status(bot, update, session):
+    session.is_open = not session.is_open
+    session.save()
+
+
 def callback_query_handler(bot, update):
     data = update.callback_query.data
     if data == "bill":
         bill(bot, update)
+    elif data == "toggle_session_status":
+        toggle_session_status(bot, update)
 
 
 def main():
@@ -366,6 +393,8 @@ def main():
     dp.add_handler(CommandHandler("help", show_help))
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("end", end))
+    dp.add_handler(CommandHandler("me", my_orders))
+    dp.add_handler(CommandHandler("delete", delete_order))
     dp.add_handler(MessageHandler(Filters.private & Filters.update.message, add_order))
     dp.add_handler(
         MessageHandler(Filters.private & Filters.update.edited_message, update_order)

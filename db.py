@@ -19,6 +19,7 @@ class Session(DBModel):
     tax = fields.FloatField(default=0)
     orders_message_id = fields.IntField()
     values_message_id = fields.IntField()
+    is_open = fields.BooleanField(default=True)
     meta = {"collection": "sessions"}
 
 
